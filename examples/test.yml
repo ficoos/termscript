@@ -4,7 +4,7 @@
   # type - enter input as written. Can be escaped
 - type: vim\n
   # sleep - wait for some time before executing next command
-- sleep: 1
+- sleep: 4
 - type: |
     ihello world
     this is multiline<esc>
