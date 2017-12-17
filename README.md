@@ -1,7 +1,7 @@
 # Termscript
 This program allows you to script terminal interactions and play them
 
-This is a work in progress. Patchet welcome
+This is a work in progress. Patches welcome.
 
 ![Example](https://github.com/ficoos/termscript/raw/master/aux/recursive.gif)
 
