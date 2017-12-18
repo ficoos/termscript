@@ -16,6 +16,7 @@ import random
 import time
 import yaml
 import re
+import argparse
 
 KEYCODES = {
     'esc': '\x1b'
@@ -278,8 +279,21 @@ def record_command(script, command=None, env=os.environ):
 
     os.waitpid(pid, 0)
 
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description='Script terminal interactions')
+    parser.add_argument('script_file',
+                        metavar='SCRIPT',
+                        type=argparse.FileType('r'),
+                        nargs=1,
+                        help='the script to execute')
+
+    return parser.parse_args(sys.argv[1:])
+
 if __name__ == "__main__":
-    with open(sys.argv[1], 'r') as f:
+    args = parse_args()
+    with args.script_file[0] as f:
         s = compile(yaml.load(f))
 
     record_command(s)
