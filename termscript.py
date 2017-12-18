@@ -18,8 +18,31 @@ import yaml
 import re
 import argparse
 
+
+def ctrl(c):
+    return chr(ord(c.upper()) - ord('A') + 1)
+
+
+def alt(c):
+    return '\x1b' + chr(ord(c.lower()) - ord('a') + 1)
+
+
+def alt_shift(c):
+    return '\x1b' + chr(ord(c.upper()) - ord('a') + 1)
+
+
+def csi(v):
+    return '\x1b[' + v
+
+
 KEYCODES = {
-    'esc': '\x1b'
+    'esc': '\x1b',
+    'del': '\x7f',
+    'up': csi('A'),
+    'down': csi('B'),
+    'right': csi('C'),
+    'left': csi('D'),
+    'el': ctrl(b'U'),
 }
 
 ACT_SLEEP = 1
@@ -37,6 +60,23 @@ def script_command(name):
 
 
 def _escape_keys(m):
+    keycode = m.group(1).lower()
+    if keycode.startswith('ctrl-'):
+        try:
+            return ctrl(keycode.split('-', 1)[1])
+        except:
+            pass
+    elif keycode.startswith('alt-shift-') or keycode.startswith('shift-alt-'):
+        try:
+            return alt_shift(keycode.split('-', 2)[2])
+        except:
+            pass
+    elif keycode.startswith('alt-'):
+        try:
+            return alt(keycode.split('-', 1)[1])
+        except:
+            pass
+
     return KEYCODES.get(m.group(1).lower(), '')
 
 
