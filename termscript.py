@@ -24,14 +24,28 @@ KEYCODES = {
 ACT_SLEEP = 1
 ACT_WAIT_SEQUENCE = 2
 
+SCRIPT_COMMANDS = {}
+
+
+def script_command(name):
+    def register(f):
+        SCRIPT_COMMANDS[name] = f
+        return f
+
+    return register
+
+
 def _escape_keys(m):
     return KEYCODES.get(m.group(1).lower(), '')
+
 
 def ActSleep(timeout):
     return {ACT_SLEEP: time.time() + timeout}
 
+
 def ActWaitSequence(sequence):
     return {ACT_WAIT_SEQUENCE: sequence}
+
 
 class raw():
     def __init__(self, fd):
@@ -55,40 +69,77 @@ def _rand_range(start, end):
     return start + (random.random() * (end - start))
 
 
-def _cmd_enter(cmd, master_fd):
-    text = cmd.get('enter')
+class Sequence(object):
+    def __init__(self, commands):
+        self._commands = commands
+
+    def execute(self, master_fd):
+        for command in self._commands:
+            yield from command.execute(master_fd)
+
+
+@script_command('enter')
+def CmdEnter(text):
+    text = str(text)
     if not text.endswith('\n'):
         text += '\n'
 
-    yield from _cmd_type({'type': text}, master_fd)
-    yield from _cmd_wait_prompt({'wait-prompt': True}, master_fd)
-
-def _cmd_sleep(cmd, master_fd):
-    yield ActSleep(cmd.get('sleep'))
-
-def _cmd_type(cmd, master_fd):
-    text = cmd.get('type').encode('utf8').decode('unicode_escape')
-    text = re.sub(r'<([\w\d-]+)>', _escape_keys, text)
-    for c in text:
-        yield ActSleep(_rand_range(0.05, 0.2))
-        os.write(master_fd, c.encode('utf8'))
-
-def _cmd_wait_prompt(cmd, master_fd):
-    yield ActWaitSequence(b'\x1B]777;notify;Command completed;')
+    return Sequence((CmdType(text), CmdWaitPrompt()))
 
 
-def script_runner(script, master_fd):
+@script_command('type')
+class CmdType(object):
+    def __init__(self, text):
+        self._text = str(text)
+
+    def execute(self, master_fd):
+        text = self._text.encode('utf8').decode('unicode_escape')
+        text = re.sub(r'<([\w\d-]+)>', _escape_keys, text)
+        for c in text:
+            yield ActSleep(_rand_range(0.05, 0.2))
+            os.write(master_fd, c.encode('utf8'))
+
+
+@script_command('wait-prompt')
+class CmdWaitPrompt(object):
+    def execute(self, master_fd):
+        yield ActWaitSequence(b'\x1B]777;notify;Command completed;')
+
+
+@script_command('sleep')
+class CmdSleep(object):
+    def __init__(self, timeout):
+        self._timeout = float(timeout)
+
+    def execute(self, master_fd):
+        yield ActSleep(self._timeout)
+
+
+def compile(script):
+    commands = []
     for cmd in script:
-        cmd = {cmd:True} if isinstance(cmd, str) else cmd
-        if cmd.get('enter'):
-            yield from _cmd_enter(cmd, master_fd)
-        if cmd.get('sleep'):
-            yield from _cmd_sleep(cmd, master_fd)
-        if cmd.get('type'):
-            yield from _cmd_type(cmd, master_fd)
+        if isinstance(cmd, str):
+            command_name = cmd
+            command_arg = None
+        elif isinstance(cmd, dict):
+            if len(cmd.keys()) != 1:
+                raise RuntimeError("Too many commands per line: %r", cmd)
 
-        if cmd.get('wait-prompt'):
-            yield from _cmd_wait_prompt(cmd, master_fd)
+            command_name = list(cmd.keys())[0]
+            command_arg = cmd.get(command_name)
+        else:
+            raise RuntimeError("Invalid command: %r", cmd)
+
+        cmd_class = SCRIPT_COMMANDS.get(command_name)
+        if not cmd_class:
+            raise RuntimeError("Unknown command '%s'", command_name)
+
+        if command_arg is None:
+            commands.append(cmd_class())
+        else:
+            commands.append(cmd_class(command_arg))
+
+    return Sequence(commands)
 
 
 def record_command(script, command=None, env=os.environ):
@@ -99,7 +150,6 @@ def record_command(script, command=None, env=os.environ):
         command = (env.get('SHELL'),)
 
     def _set_pty_size():
-        # Get the terminal size of the real terminal, set it on the pseudoterminal.
         if os.isatty(pty.STDOUT_FILENO):
             buf = array.array('h', [0, 0, 0, 0])
             fcntl.ioctl(pty.STDOUT_FILENO, termios.TIOCGWINSZ, buf, True)
@@ -133,7 +183,7 @@ def record_command(script, command=None, env=os.environ):
         return old_handlers
 
     def _copy(signal_fd):
-        runner = script_runner(script, master_fd)
+        runner = script.execute(master_fd)
 
         fds = [master_fd, pty.STDIN_FILENO, signal_fd]
 
@@ -188,7 +238,10 @@ def record_command(script, command=None, env=os.environ):
                 if data:
                     signals = struct.unpack('%uB' % len(data), data)
                     for sig in signals:
-                        if sig in [signal.SIGCHLD, signal.SIGHUP, signal.SIGTERM, signal.SIGQUIT]:
+                        if sig in [signal.SIGCHLD,
+                                   signal.SIGHUP,
+                                   signal.SIGTERM,
+                                   signal.SIGQUIT]:
                             os.close(master_fd)
                             return
                         elif sig == signal.SIGWINCH:
@@ -227,6 +280,6 @@ def record_command(script, command=None, env=os.environ):
 
 if __name__ == "__main__":
     with open(sys.argv[1], 'r') as f:
-        s = yaml.load(f)
+        s = compile(yaml.load(f))
 
     record_command(s)
