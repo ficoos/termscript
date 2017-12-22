@@ -162,8 +162,9 @@ class CmdSleep(object):
 
 class ScriptParseError(RuntimeError):
     def __init__(self, file, token, msg):
-        line = token.start_mark.line
-        column = token.start_mark.column
+        mark = getattr(token, 'start_mark', getattr(token, 'problem_mark'))
+        line = mark.line
+        column = mark.column
         super(ScriptParseError, self).__init__("%s:%d:%d:%s" % (file,
                                                                 line,
                                                                 column,
@@ -177,33 +178,36 @@ def compile(script):
 
         return token
 
-    tokens = yaml.scan(script)
-    _expect_token(tokens.send(None), yaml.StreamStartToken)
-    _expect_token(tokens.send(None), yaml.BlockMappingStartToken)
+    try:
+        tokens = yaml.scan(script)
+        _expect_token(tokens.send(None), yaml.StreamStartToken)
+        _expect_token(tokens.send(None), yaml.BlockMappingStartToken)
 
-    commands = []
-    for token in tokens:
-        if isinstance(token, yaml.BlockEndToken):
-            break
+        commands = []
+        for token in tokens:
+            if isinstance(token, yaml.BlockEndToken):
+                break
 
-        _expect_token(token, yaml.KeyToken)
-        key_tok = _expect_token(tokens.send(None), yaml.ScalarToken)
-        command_name = key_tok.value
-        _expect_token(tokens.send(None), yaml.ValueToken)
-        value_tok = _expect_token(tokens.send(None), yaml.ScalarToken)
-        command_arg = value_tok.value
+            _expect_token(token, yaml.KeyToken)
+            key_tok = _expect_token(tokens.send(None), yaml.ScalarToken)
+            command_name = key_tok.value
+            _expect_token(tokens.send(None), yaml.ValueToken)
+            value_tok = _expect_token(tokens.send(None), yaml.ScalarToken)
+            command_arg = value_tok.value
 
-        cmd_class = SCRIPT_COMMANDS.get(command_name)
-        if not cmd_class:
-            raise ScriptParseError(script.name, key_tok,
-                                   ("Unknown command '%s'" % command_name))
+            cmd_class = SCRIPT_COMMANDS.get(command_name)
+            if not cmd_class:
+                raise ScriptParseError(script.name, key_tok,
+                                       ("Unknown command '%s'" % command_name))
 
-        try:
-            commands.append(cmd_class(command_arg))
-        except Exception as e:
-            raise ScriptParseError(script.name, value_tok, str(e))
+            try:
+                commands.append(cmd_class(command_arg))
+            except Exception as e:
+                raise ScriptParseError(script.name, value_tok, str(e))
 
-    _expect_token(tokens.send(None), yaml.StreamEndToken)
+        _expect_token(tokens.send(None), yaml.StreamEndToken)
+    except yaml.scanner.ScannerError as e:
+        raise ScriptParseError(script.name, e, e.problem)
 
     return Sequence(commands)
 
