@@ -7,10 +7,10 @@ This is a work in progress. Patches welcome.
 
 # How to use
 ```
-$ termscript.py foo.yml
+$ termscript.py foo.ts
 ```
 
 # Use with asciinema
 ```
-$ asciinema rec rec.json -c 'termscript.py foo.yml'
+$ asciinema rec rec.json -c 'termscript.py foo.ts'
 ```
