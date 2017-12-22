@@ -125,7 +125,7 @@ def CmdEnter(text):
     if not text.endswith('\n'):
         text += '\n'
 
-    return Sequence((CmdType(text), CmdWaitPrompt()))
+    return Sequence((CmdType(text), CmdWait('prompt')))
 
 
 @script_command('type')
@@ -141,8 +141,12 @@ class CmdType(object):
             os.write(master_fd, c.encode('utf8'))
 
 
-@script_command('wait-prompt')
-class CmdWaitPrompt(object):
+@script_command('wait')
+class CmdWait(object):
+    def __init__(self, what):
+        if what != 'prompt':
+            raise RuntimeError("Invalid wait argument '%s'" % what)
+
     def execute(self, master_fd):
         yield ActWaitSequence(b'\x1B]777;notify;Command completed;')
 
@@ -156,29 +160,50 @@ class CmdSleep(object):
         yield ActSleep(self._timeout)
 
 
-def compile(script):
-    commands = []
-    for cmd in script:
-        if isinstance(cmd, str):
-            command_name = cmd
-            command_arg = None
-        elif isinstance(cmd, dict):
-            if len(cmd.keys()) != 1:
-                raise RuntimeError("Too many commands per line: %r", cmd)
+class ScriptParseError(RuntimeError):
+    def __init__(self, file, token, msg):
+        line = token.start_mark.line
+        column = token.start_mark.column
+        super(ScriptParseError, self).__init__("%s:%d:%d:%s" % (file,
+                                                                line,
+                                                                column,
+                                                                msg))
 
-            command_name = list(cmd.keys())[0]
-            command_arg = cmd.get(command_name)
-        else:
-            raise RuntimeError("Invalid command: %r", cmd)
+
+def compile(script):
+    def _expect_token(token, token_type, msg="invalid syntax"):
+        if not isinstance(token, token_type):
+            raise ScriptParseError(script.name, token, msg)
+
+        return token
+
+    tokens = yaml.scan(script)
+    _expect_token(tokens.send(None), yaml.StreamStartToken)
+    _expect_token(tokens.send(None), yaml.BlockMappingStartToken)
+
+    commands = []
+    for token in tokens:
+        if isinstance(token, yaml.BlockEndToken):
+            break
+
+        _expect_token(token, yaml.KeyToken)
+        key_tok = _expect_token(tokens.send(None), yaml.ScalarToken)
+        command_name = key_tok.value
+        _expect_token(tokens.send(None), yaml.ValueToken)
+        value_tok = _expect_token(tokens.send(None), yaml.ScalarToken)
+        command_arg = value_tok.value
 
         cmd_class = SCRIPT_COMMANDS.get(command_name)
         if not cmd_class:
-            raise RuntimeError("Unknown command '%s'", command_name)
+            raise ScriptParseError(script.name, key_tok,
+                                   ("Unknown command '%s'" % command_name))
 
-        if command_arg is None:
-            commands.append(cmd_class())
-        else:
+        try:
             commands.append(cmd_class(command_arg))
+        except Exception as e:
+            raise ScriptParseError(script.name, value_tok, str(e))
+
+    _expect_token(tokens.send(None), yaml.StreamEndToken)
 
     return Sequence(commands)
 
@@ -333,7 +358,10 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    with args.script_file[0] as f:
-        s = compile(yaml.load(f))
+    try:
+        s = compile(args.script_file[0])
+    except ScriptParseError as e:
+        print(str(e))
+        sys.exit(1)
 
     record_command(s)
