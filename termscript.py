@@ -7,8 +7,6 @@ import array
 import fcntl
 import termios
 import select
-import io
-import shlex
 import sys
 import struct
 import tty
