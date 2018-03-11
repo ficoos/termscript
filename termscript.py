@@ -16,25 +16,27 @@ import yaml
 import re
 import argparse
 
+ESC = '\x1b'
+
 
 def ctrl(c):
     return chr(ord(c.upper()) - ord('A') + 1)
 
 
 def alt(c):
-    return '\x1b' + chr(ord(c.lower()) - ord('a') + 1)
+    return ESC + chr(ord(c.lower()) - ord('a') + 1)
 
 
 def alt_shift(c):
-    return '\x1b' + chr(ord(c.upper()) - ord('a') + 1)
+    return ESC + chr(ord(c.upper()) - ord('a') + 1)
 
 
 def csi(v):
-    return '\x1b[' + v
+    return ESC + v
 
 
 KEYCODES = {
-    'esc': '\x1b',
+    'esc': ESC,
     'del': '\x7f',
     'up': csi('A'),
     'down': csi('B'),
