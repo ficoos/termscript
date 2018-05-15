@@ -24,15 +24,15 @@ def ctrl(c):
 
 
 def alt(c):
-    return ESC + chr(ord(c.lower()) - ord('a') + 1)
+    return ESC + '[' + chr(ord(c.lower()) - ord('a') + 1)
 
 
 def alt_shift(c):
-    return ESC + chr(ord(c.upper()) - ord('a') + 1)
+    return ESC + '[' + chr(ord(c.upper()) - ord('a') + 1)
 
 
 def csi(v):
-    return ESC + v
+    return ESC + '[' + v
 
 
 KEYCODES = {
@@ -42,7 +42,7 @@ KEYCODES = {
     'down': csi('B'),
     'right': csi('C'),
     'left': csi('D'),
-    'el': ctrl(b'U'),
+    'el': ctrl('U'),
 }
 
 ACT_SLEEP = 1
@@ -136,9 +136,16 @@ class CmdType(object):
     def execute(self, master_fd):
         text = self._text.encode('utf8').decode('unicode_escape')
         text = re.sub(r'<([\w\d-]+)>', _escape_keys, text)
+        in_escape = False
         for c in text:
-            yield ActSleep(_rand_range(0.05, 0.2))
+            if c == ESC:
+                in_escape = True
+
             os.write(master_fd, c.encode('utf8'))
+            if in_escape and c not in ('[', ESC):
+                in_escape = False
+            if not in_escape:
+                yield ActSleep(_rand_range(0.05, 0.1))
 
 
 @script_command('wait')
@@ -162,7 +169,10 @@ class CmdSleep(object):
 
 class ScriptParseError(RuntimeError):
     def __init__(self, file, token, msg):
-        mark = getattr(token, 'start_mark', getattr(token, 'problem_mark'))
+        if hasattr(token, 'start_mark'):
+            mark = getattr(token, 'start_mark')
+        else:
+            mark = getattr(token, 'problem_mark')
         line = mark.line
         column = mark.column
         super(ScriptParseError, self).__init__("%s:%d:%d:%s" % (file,
